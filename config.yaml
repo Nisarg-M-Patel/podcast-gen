@@ -1,0 +1,33 @@
+name: podcast-gen
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.11
+  - pip
+  - numpy
+  - pip:
+    # PDF Processing
+    - docling
+    
+    # Vector DB & Embeddings
+    - chromadb
+    - sentence-transformers
+    
+    # BM25 for keyword search
+    - rank-bm25
+    
+    # LLM APIs
+    - anthropic
+    - openai
+    
+    # TTS
+    - elevenlabs
+    
+    # Utilities
+    - requests
+    - pyyaml
+    - tqdm
+    
+    # Data handling
+    - pandas
