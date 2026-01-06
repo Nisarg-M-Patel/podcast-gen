@@ -17,13 +17,9 @@ class SectionType(Enum):
 
 class RelationshipType(Enum):
     """Types of relationships between chunks."""
-    DEPENDS_ON = "depends_on"          # A needs B to be understood
-    IMPLEMENTS = "implements"          # A uses method from B
-    VALIDATES = "validates"            # A provides evidence for B
-    CONTEXTUALIZES = "contextualizes"  # B provides background for A
-    EXTENDS = "extends"                # A builds upon B
-    COMPARES = "compares"              # A compares with B
-    REFERENCES = "references"          # A explicitly mentions B
+    PREREQUISITE = "prerequisite"  # A depends on B (must read B first)
+    SUPPORTS = "supports"           # A provides evidence for B
+    REFERENCES = "references"       # A explicitly mentions B
 
 @dataclass
 class Chunk:

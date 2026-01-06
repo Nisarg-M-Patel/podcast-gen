@@ -1,17 +1,51 @@
 # graph.py
 import json
 import re
+import os
+import yaml
 from typing import List, Dict
 from pathlib import Path
-import anthropic
+from dotenv import load_dotenv
+from google import genai
 from models import Chunk, Edge, RelationshipType, DependencyGraph, SectionType
+
+# Load environment variables
+load_dotenv()
 
 class GraphBuilder:
     """Build dependency graph with deterministic + validated LLM."""
     
-    def __init__(self, anthropic_api_key: str):
-        self.client = anthropic.Anthropic(api_key=anthropic_api_key)
-        self.validator = EdgeValidator()
+    def __init__(self, config_path: str = "config.yaml"):
+        # Load config
+        with open(config_path, 'r') as f:
+            self.config = yaml.safe_load(f)
+        
+        # Setup LLM
+        llm_config = self.config['graph']['llm']
+        self.provider = llm_config['provider']
+        self.model_name = llm_config['model']
+        self.temperature = llm_config.get('temperature', 0.0)
+        self.max_tokens = llm_config.get('max_tokens', 2000)
+        
+        # Initialize LLM client
+        if self.provider == "google":
+            api_key = os.getenv("GOOGLE_API_KEY")
+            if not api_key:
+                raise ValueError("GOOGLE_API_KEY not found in .env file")
+            
+            # New API
+            self.client = genai.Client(api_key=api_key)
+            self.model = self.model_name  # Just store the name
+        else:
+            raise ValueError(f"Unsupported LLM provider: {self.provider}")
+        
+        # Setup validator
+        validation_config = self.config['graph']['validation']
+        self.validator = EdgeValidator(
+            confidence_threshold=validation_config['confidence_threshold']
+        )
+        
+        print(f"Using {self.provider} - {self.model_name}")
     
     def build_graph(self, chunks: List[Chunk], paper_title: str) -> DependencyGraph:
         """
@@ -27,7 +61,7 @@ class GraphBuilder:
         print(f"    Found {len(reference_edges)} reference edges")
         
         # Step 2: LLM for semantic relationships
-        print("  [2/3] Extracting semantic relationships (LLM)...")
+        print(f"  [2/3] Extracting semantic relationships ({self.model_name})...")
         semantic_edges = self._extract_semantic_edges(chunks)
         print(f"    Found {len(semantic_edges)} semantic edges (before validation)")
         
@@ -86,6 +120,7 @@ class GraphBuilder:
     def _extract_semantic_edges(self, chunks: List[Chunk]) -> List[Edge]:
         """Use LLM to extract PREREQUISITE and SUPPORTS relationships."""
         edges = []
+        max_relationships = self.config['graph']['validation']['max_relationships_per_section']
         
         # Only analyze key sections
         key_chunks = [c for c in chunks if c.section_type in [
@@ -111,7 +146,7 @@ class GraphBuilder:
             ]
             
             # Ask LLM
-            prompt = self._build_relationship_prompt(source, other_sections)
+            prompt = self._build_relationship_prompt(source, other_sections, max_relationships)
             response = self._call_llm(prompt)
             
             # Parse and create edges
@@ -119,7 +154,7 @@ class GraphBuilder:
         
         return edges
     
-    def _build_relationship_prompt(self, source: Chunk, other_sections: List[str]) -> str:
+    def _build_relationship_prompt(self, source: Chunk, other_sections: List[str], max_rel: int) -> str:
         return f"""You are analyzing relationships between sections of a research paper.
 
 SOURCE SECTION:
@@ -144,7 +179,7 @@ Identify relationships from the SOURCE to OTHER sections:
 Rules:
 - Be conservative - only return HIGH-CONFIDENCE relationships
 - Provide specific evidence from the text
-- A section can have 0-3 relationships
+- A section can have 0-{max_rel} relationships
 
 Return JSON array:
 [
@@ -159,13 +194,31 @@ Return JSON array:
 Return ONLY the JSON array, no other text."""
 
     def _call_llm(self, prompt: str) -> str:
-        """Call Claude API."""
-        message = self.client.messages.create(
-            model="claude-sonnet-4-20250514",
-            max_tokens=2000,
-            messages=[{"role": "user", "content": prompt}]
-        )
-        return message.content[0].text
+        """Call LLM API with retry logic."""
+        import time
+        
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                if self.provider == "google":
+                    response = self.client.models.generate_content(
+                        model=self.model,
+                        contents=prompt,
+                        config={
+                            "temperature": self.temperature,
+                            "max_output_tokens": self.max_tokens,
+                        }
+                    )
+                    return response.text
+            except Exception as e:
+                if "429" in str(e) and attempt < max_retries - 1:
+                    wait_time = (attempt + 1) * 10
+                    print(f"      Rate limited, waiting {wait_time}s...")
+                    time.sleep(wait_time)
+                else:
+                    print(f"      Warning: LLM API error: {e}")
+                    return "[]"
+        return "[]"
     
     def _parse_llm_response(
         self,
@@ -398,6 +451,9 @@ Return ONLY the JSON array, no other text."""
 class EdgeValidator:
     """Validate LLM-generated edges with domain rules."""
     
+    def __init__(self, confidence_threshold: float = 0.7):
+        self.confidence_threshold = confidence_threshold
+    
     def validate(self, edge: Edge, chunks: List[Chunk]) -> bool:
         """Check if edge passes all validation rules."""
         chunks_dict = {c.id: c for c in chunks}
@@ -412,7 +468,7 @@ class EdgeValidator:
             return False
         
         # Rule 2: Confidence threshold
-        if edge.confidence < 0.7:
+        if edge.confidence < self.confidence_threshold:
             return False
         
         # Rule 3: PREREQUISITE flows backward in doc
@@ -454,7 +510,6 @@ class EdgeValidator:
 
 
 if __name__ == "__main__":
-    import os
     from parser import PDFParser, Chunker
     
     # Setup
@@ -467,13 +522,8 @@ if __name__ == "__main__":
     chunks = chunker.load_chunks(chunks_path)
     print(f"Loaded {len(chunks)} chunks")
     
-    # Build graph
-    api_key = os.environ.get("ANTHROPIC_API_KEY")
-    if not api_key:
-        print("Error: Set ANTHROPIC_API_KEY environment variable")
-        exit(1)
-    
-    builder = GraphBuilder(api_key)
+    # Build graph (reads config from config.yaml)
+    builder = GraphBuilder()
     graph = builder.build_graph(chunks, "GAVEL Paper")
     
     # Save

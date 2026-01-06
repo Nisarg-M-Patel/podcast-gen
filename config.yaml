@@ -20,6 +20,7 @@ dependencies:
     # LLM APIs
     - anthropic
     - openai
+    - google-genai
     
     # TTS
     - elevenlabs
@@ -28,6 +29,22 @@ dependencies:
     - requests
     - pyyaml
     - tqdm
+    - python-dotenv
     
     # Data handling
     - pandas
+
+# Graph building configuration
+graph:
+  llm:
+    provider: "google"  # google, anthropic, openai
+    model: "gemini-2.5-flash"  # Use latest Flash model
+    temperature: 0.0  # Deterministic for graph building
+    max_tokens: 2000
+  
+  validation:
+    confidence_threshold: 0.7
+    max_relationships_per_section: 3
+  
+  visualization:
+    format: ["json", "dot"]  # Output formats
