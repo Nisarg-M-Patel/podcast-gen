@@ -1,5 +1,5 @@
 # models.py
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 from typing import Optional
 
@@ -15,12 +15,6 @@ class SectionType(Enum):
     APPENDIX = "appendix"
     OTHER = "other"
 
-class RelationshipType(Enum):
-    """Types of relationships between chunks."""
-    PREREQUISITE = "prerequisite"  # A depends on B (must read B first)
-    SUPPORTS = "supports"           # A provides evidence for B
-    REFERENCES = "references"       # A explicitly mentions B
-
 @dataclass
 class Chunk:
     """A chunk of text from a research paper."""
@@ -32,20 +26,44 @@ class Chunk:
     doc_position: int               # Order in document
     page: int
     
-@dataclass
-class Edge:
-    """A relationship between two chunks."""
-    source: str              # chunk_id
-    target: str              # chunk_id
-    relation_type: RelationshipType
-    confidence: float        # 0.0 - 1.0
-    evidence_chunk_id: str   # chunk containing evidence text
+# --- New Models for Narrative-Driven Podcast Generation ---
 
 @dataclass
-class DependencyGraph:
-    """Graph of relationships between chunks in a paper."""
-    chunks: dict[str, Chunk]
-    edges: dict[str, list[Edge]]           # source_id -> list of outgoing edges
-    reverse_edges: dict[str, list[Edge]]   # target_id -> list of incoming edges
+class NarrativeHook:
+    """Something interesting/surprising discovered in the paper."""
+    type: str  # "surprising_finding", "contradiction", "novel_approach", "mystery", etc.
+    description: str
+    evidence_chunk_ids: list[str]
+    quote: Optional[str] = None
+
+@dataclass
+class StoryBeat:
+    """A segment of the podcast narrative."""
+    title: str
+    focus: str  # What this beat is about
+    narrative_role: str  # "establish_stakes", "create_tension", "reveal_solution", etc.
+    retrieve_from_sections: list[str]  # Which sections to pull content from
+    content_query: str  # Query to retrieve relevant chunks
+    retrieved_chunks: list[Chunk] = field(default_factory=list)
+    contextual_summaries: list[str] = field(default_factory=list)
+
+@dataclass
+class StoryStructure:
+    """Overall narrative arc for the podcast."""
+    narrative_type: str  # "detective_story", "breakthrough", "comparison", etc.
+    hook: str  # The opening hook that grabs attention
+    tension_points: list[str]  # Key moments of surprise/conflict
+    beats: list[StoryBeat]  # Ordered sequence of story segments
+
+@dataclass
+class DialogueTurn:
+    """A single turn in the podcast dialogue."""
+    speaker: str  # "host1" or "host2"
+    text: str
+    
+@dataclass
+class PodcastScript:
+    """Complete podcast script."""
     paper_title: str
-    authors: list[str]
+    story_structure: StoryStructure
+    dialogue: list[DialogueTurn]
